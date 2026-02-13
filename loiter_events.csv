@@ -1,7 +1,0 @@
-timestamp,event_type,label,confidence,track_id,zone,color
-2026-02-13 14:29:58,LOITERING,person,0.86,4,restricted_zone,blue
-2026-02-13 14:30:06,LOITERING,person,0.84,4,restricted_zone,blue
-2026-02-13 14:30:11,LOITERING,person,0.86,24,restricted_zone,blue
-2026-02-13 14:30:12,LOITERING,person,0.61,37,restricted_zone,black
-2026-02-13 14:30:14,LOITERING,person,0.75,9,restricted_zone,orange
-2026-02-13 14:30:15,LOITERING,person,0.80,4,restricted_zone,blue
