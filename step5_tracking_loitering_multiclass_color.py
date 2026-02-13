@@ -10,23 +10,20 @@ from ultralytics import YOLO
 
 
 # -----------------------
-# CONFIG
+# CONFIG (PRECISION)
 # -----------------------
 VIDEO_PATH = "test.mp4"
 
-CONF_THRES = 0.35
-IMGSZ = 640
+CONF_THRES = 0.50       # ↑ more precise
+IOU_THRES = 0.45        # NMS IoU
+IMGSZ = 960             # ↑ more detail (if slow: 832 or 640)
 QUEUE_MAX = 1
 
-# Track these object types (add/remove freely)
 TARGET_LABELS = {
     "person",
     "car", "truck", "bus", "motorcycle", "bicycle",
-    "dog", "cat"
 }
 
-# Loitering: which classes should trigger loiter logic?
-# (Usually people only; you can add "car" if you want “car loitering”.)
 LOITER_CLASSES = {"person"}
 LOITER_SECONDS = 6.0
 EVENT_COOLDOWN_SEC = 8.0
@@ -68,21 +65,20 @@ def log_event_csv(writer, event_type, label, conf, track_id, zone_name, color_na
 
 
 # -----------------------
-# COLOR ESTIMATION (basic, fast)
+# COLOR ESTIMATION (MORE PRECISE)
 # -----------------------
-def estimate_basic_color(frame_bgr, x1, y1, x2, y2):
+def estimate_basic_color_precise(frame_bgr, x1, y1, x2, y2):
     """
-    Returns a basic color name based on the dominant hue in the bbox.
-    Not perfect; works best in good lighting.
+    More precise than naive:
+    - Uses inner crop (removes background edges)
+    - Ignores low saturation and dark pixels
+    - Classifies black/white/gray first
     """
     h, w = frame_bgr.shape[:2]
-
-    # clamp bbox
     x1 = max(0, min(w - 1, x1))
     x2 = max(0, min(w - 1, x2))
     y1 = max(0, min(h - 1, y1))
     y2 = max(0, min(h - 1, y2))
-
     if x2 <= x1 or y2 <= y1:
         return "unknown"
 
@@ -90,42 +86,38 @@ def estimate_basic_color(frame_bgr, x1, y1, x2, y2):
     if roi.size == 0:
         return "unknown"
 
-    # sample center region to reduce background influence
+    # inner crop (drop 20% borders)
     rh, rw = roi.shape[:2]
-    cx1 = int(rw * 0.25)
-    cx2 = int(rw * 0.75)
-    cy1 = int(rh * 0.25)
-    cy2 = int(rh * 0.75)
-    roi = roi[cy1:cy2, cx1:cx2] if (cx2 > cx1 and cy2 > cy1) else roi
+    ix1, ix2 = int(rw * 0.20), int(rw * 0.80)
+    iy1, iy2 = int(rh * 0.20), int(rh * 0.80)
+    if ix2 > ix1 and iy2 > iy1:
+        roi = roi[iy1:iy2, ix1:ix2]
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-    # ignore very dark pixels and very low-saturation pixels when deciding hue
     H = hsv[:, :, 0].astype(np.float32)   # 0..179
     S = hsv[:, :, 1].astype(np.float32)   # 0..255
     V = hsv[:, :, 2].astype(np.float32)   # 0..255
 
-    # classify black/white/gray first
     v_mean = float(np.mean(V))
     s_mean = float(np.mean(S))
 
+    # neutral colors first
     if v_mean < 55:
         return "black"
-    if v_mean > 210 and s_mean < 40:
+    if v_mean > 215 and s_mean < 45:
         return "white"
-    if s_mean < 45:
+    if s_mean < 50:
         return "gray"
 
-    # focus on pixels that likely represent “color”
-    mask = (S > 60) & (V > 60)
-    if np.count_nonzero(mask) < 50:
+    # keep only “color-relevant” pixels
+    mask = (S > 70) & (V > 70)
+    if np.count_nonzero(mask) < 80:
         return "unknown"
 
     h_vals = H[mask]
-    h_med = float(np.median(h_vals))  # robust against noise
+    h_med = float(np.median(h_vals))
 
-    # hue bins (OpenCV hue: 0-179)
-    # red is split near 0 and near 179
+    # hue buckets (OpenCV hue scale)
     if h_med < 10 or h_med > 170:
         return "red"
     if 10 <= h_med < 25:
@@ -138,7 +130,6 @@ def estimate_basic_color(frame_bgr, x1, y1, x2, y2):
         return "blue"
     if 125 <= h_med < 170:
         return "purple"
-
     return "unknown"
 
 
@@ -165,7 +156,6 @@ def reader_thread(q_frames, stop_flag):
                 q_frames.get_nowait()
             except Empty:
                 pass
-
         q_frames.put(frame)
 
         elapsed = time.time() - start
@@ -177,7 +167,6 @@ def reader_thread(q_frames, stop_flag):
 
 
 def tracker_loiter_thread(model, q_frames, q_out, stop_flag):
-    # per-track state (only used for loiter classes)
     inside_since = {}
     last_seen_inside = {}
     last_event_time = {}
@@ -192,10 +181,12 @@ def tracker_loiter_thread(model, q_frames, q_out, stop_flag):
             except Empty:
                 continue
 
+            # More precise tracking call
             results = model.track(
                 frame,
                 persist=True,
                 conf=CONF_THRES,
+                iou=IOU_THRES,
                 imgsz=IMGSZ,
                 verbose=False,
                 tracker="bytetrack.yaml",
@@ -216,33 +207,26 @@ def tracker_loiter_thread(model, q_frames, q_out, stop_flag):
                     if label not in TARGET_LABELS:
                         continue
 
-                    track_id = int(box.id[0]) if box.id is not None else None
-
                     x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                     cx = (x1 + x2) // 2
                     cy = (y1 + y2) // 2
-
                     in_zone = point_in_poly(cx, cy, ZONE_POLY)
 
-                    # Estimate object color (fast)
-                    color_name = estimate_basic_color(frame, x1, y1, x2, y2)
+                    track_id = int(box.id[0]) if box.id is not None else None
+                    color_name = estimate_basic_color_precise(frame, x1, y1, x2, y2)
 
-                    # visuals
                     box_color = (0, 255, 0) if in_zone else (255, 255, 255)
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, 2)
 
                     dwell = 0.0
-
-                    # Loiter logic only for LOITER_CLASSES
                     if label in LOITER_CLASSES and track_id is not None:
                         if in_zone:
                             if track_id not in inside_since:
                                 inside_since[track_id] = now
                             last_seen_inside[track_id] = now
-
                             dwell = now - inside_since[track_id]
-                            last_evt = last_event_time.get(track_id, 0.0)
 
+                            last_evt = last_event_time.get(track_id, 0.0)
                             if dwell >= LOITER_SECONDS and (now - last_evt) >= EVENT_COOLDOWN_SEC:
                                 last_event_time[track_id] = now
                                 log_event_csv(writer, "LOITERING", label, conf, track_id, ZONE_NAME, color_name)
@@ -279,7 +263,8 @@ def tracker_loiter_thread(model, q_frames, q_out, stop_flag):
 # MAIN
 # -----------------------
 def main():
-    model = YOLO("yolov8n.pt")
+    # Accuracy upgrade: use yolov8s
+    model = YOLO("yolov8s.pt")   # <- change to yolov8m.pt if you can
 
     q_frames = Queue(maxsize=QUEUE_MAX)
     q_out = Queue(maxsize=QUEUE_MAX)
@@ -287,11 +272,10 @@ def main():
 
     t_reader = threading.Thread(target=reader_thread, args=(q_frames, stop_flag), daemon=True)
     t_track = threading.Thread(target=tracker_loiter_thread, args=(model, q_frames, q_out, stop_flag), daemon=True)
-
     t_reader.start()
     t_track.start()
 
-    cv2.namedWindow("Cyrelo - Step 5 (Multi + Color + Loiter)", cv2.WINDOW_NORMAL)
+    cv2.namedWindow("Cyrelo - Step 5 (Precise)", cv2.WINDOW_NORMAL)
 
     last_time = time.time()
     display_fps = 0.0
@@ -313,15 +297,14 @@ def main():
 
             cv2.putText(
                 frame,
-                f"FPS: {display_fps:.1f} | Loiter: {LOITER_SECONDS:.0f}s | Q to quit",
+                f"FPS: {display_fps:.1f} | conf={CONF_THRES:.2f} iou={IOU_THRES:.2f} | Q to quit",
                 (15, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
                 (255, 255, 255),
                 2,
             )
-
-            cv2.imshow("Cyrelo - Step 5 (Multi + Color + Loiter)", frame)
+            cv2.imshow("Cyrelo - Step 5 (Precise)", frame)
 
     cv2.destroyAllWindows()
     print(f"✅ Done. Events saved to {CSV_PATH}")
