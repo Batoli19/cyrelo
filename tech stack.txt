@@ -1,0 +1,33 @@
+Optomized for Low cost development
+works with old cameras (for now)
+easy mainance
+on -prem first
+
+A) On -Prem Mvp stack
+video ingest
+use OpenCV & FFmpeg (for RTSP stability)
+
+B) Ai inference
+Yolov8(ultralytics)+ Pytorch
+use Pretrained COCOC classes (person ,car,truck)
+
+C)Backend
+Python+ fastAPI
+WEbsocket For live events
+
+D)Database
+SQLite for mvp
+PostgreSql for scaling
+
+E) Frontend
+simple Dashbaord
+PLain simple Html+ js
+
+F) Packaging
+Docker
+
+G) Notifications
+MVP:Email 
+Whats app/sms
+or Own app
+\\ this depends on the cheapes option available

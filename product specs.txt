@@ -1,0 +1,24 @@
+core values
+
+1. Detect activities
+2.real time alerts(special in restricted areas, and after hours)
+3.search and sort filter, and events review(filter using time, type, place , activitie, etc, specific detailed components)
+4.create and lable restricted zones
+5. connect to existing cameras
+6. Voice over warning and dection using voice
+
+B)operational necesities
+
+1. multi camera support
+2. privacy by design
+3. user accounts *****
+4. health monitoring****
+5. simple and easy instalation
+
+c) 2nd Phase improvemnts feature***
+
+1. fast video Search
+2.object Attributes
+3.vihicle re-identification across cameras
+4.Licence Plate
+5.Hybrid cloud dashboard
