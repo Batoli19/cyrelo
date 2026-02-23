@@ -35,8 +35,8 @@
 #### 1️⃣ Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/cyrelo.git
-cd cyrelo
+Dont Clone my Stuff Nigga!
+
 ```
 
 #### 2️⃣ Backend Setup
