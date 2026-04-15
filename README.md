@@ -8,7 +8,7 @@
 
 ---
 
-## 🎯 Key Features
+## 🎯 Key Features new key features
 
 - **Real-Time AI Detection** — YOLOv8-powered object detection at 30fps with 94% accuracy
 - **Visual Search** — Search footage by description: "red jacket", "stolen white Mercedes" — results in seconds
